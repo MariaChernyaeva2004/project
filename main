@@ -1,0 +1,219 @@
+import sys
+import sqlite3
+from str_1 import Ui_MainWindow
+from str_popular import Ui_Form_popular
+from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtWidgets import (QStatusBar)
+from str_search import Ui_Form_search
+from str_playlist import Ui_Formplaylist
+from PyQt5.QtCore import Qt, QUrl, QSize
+from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
+from PyQt5.QtMultimediaWidgets import QVideoWidget
+from PyQt5.QtWidgets import (QApplication, QFileDialog, QHBoxLayout,
+                             QSlider, QStyle, QVBoxLayout)
+from PyQt5.QtWidgets import QMainWindow, QWidget, QPushButton
+
+
+class WatchTube(QMainWindow, Ui_MainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        self.pushButton_popular.clicked.connect(self.click_popular)
+        self.pushButton_playlist.clicked.connect(self.click_playlist)
+        self.pushButton_search.clicked.connect(self.click_search)
+
+    def click_popular(self):
+        self.wnd_popular = Popular()
+        self.wnd_popular.show()
+
+    def click_playlist(self):
+        self.wnd_playlist = Playlist()
+        self.wnd_playlist.show()
+
+    def click_search(self):
+        self.wnd_search = Search()
+        self.wnd_search.show()
+
+
+class Popular(QWidget, Ui_Form_popular):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        self.print_popular()
+
+    def print_popular(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT videos.name, videos.likes
+         FROM videos INNER JOIN popular_videos 
+         WHERE popular_videos.video_name AND popular_videos.popularity = videos.id"""))
+        results.sort(key=lambda x: x[1], reverse=True)
+        results = list(map(lambda x: str(x)[1:-1], results))
+        self.listWidget.addItems(results)
+
+
+class Search(QWidget, Ui_Form_search):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        self.print_search()
+        self.comboBox.setEditable(True)
+        self.pushButton.clicked.connect(self.search)
+
+    def print_search(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        all_names = list(cursor.execute("""SELECT name FROM videos"""))
+        all_names = list(map(lambda x: str(x)[2:-3].strip(r'\n'), all_names))
+        self.comboBox.addItems(all_names)
+
+    def search(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        video_name = self.comboBox.currentText()
+        link = cursor.execute(f"""SELECT name FROM videos WHERE name = '{video_name}'""").fetchall()
+        print(link)
+        self.listWidget.addItem(str(link[0])[2:-3])
+        self.listWidget.itemClicked.connect(self.list_widget_clicked)
+
+    def list_widget_clicked(self):
+        self.wnd_video = VideoPlayer(self.comboBox.currentText())
+        self.wnd_video.setWindowTitle('ПлЕер')
+        self.wnd_video.resize(600, 400)
+        self.wnd_video.show()
+
+
+class VideoPlayer(QWidget):
+    def __init__(self, link, parent=None):
+        super(VideoPlayer, self).__init__(parent)
+        self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.link = link
+        size = QSize(16, 16)
+        video_widget = QVideoWidget()
+        self.statusBar = QStatusBar()
+        self.statusBar.setFont(QFont("Noto Sans", 7))
+        self.statusBar.setFixedHeight(14)
+        self.playButton = QPushButton()
+        self.playButton.setFixedHeight(24)
+        self.playButton.setIconSize(size)
+        self.playButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.playButton.clicked.connect(self.play)
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        self.link = str(cursor.execute(f"""SELECT video FROM videos WHERE name = '{self.link}'""")
+                        .fetchone())[2:-3]
+        self.link = self.link.strip(r'\n')
+        print(self.link)
+        self.just_play_it_already()
+        self.positionSlider = QSlider(Qt.Horizontal)
+        self.positionSlider.setRange(0, 0)
+        self.positionSlider.sliderMoved.connect(self.set_position)
+        control_layout = QHBoxLayout()
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.addWidget(self.playButton)
+        control_layout.addWidget(self.positionSlider)
+        layout = QVBoxLayout()
+        layout.addWidget(video_widget)
+        layout.addLayout(control_layout)
+        self.setLayout(layout)
+        self.mediaPlayer.setVideoOutput(video_widget)
+        self.mediaPlayer.stateChanged.connect(self.media_state_changed)
+        self.mediaPlayer.positionChanged.connect(self.position_changed)
+        self.mediaPlayer.durationChanged.connect(self.duration_changed)
+
+    def just_play_it_already(self):
+        file_name = self.link
+        if file_name != '':
+            self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
+            self.statusBar.showMessage(file_name)
+            self.play()
+
+    def play(self):
+        if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
+            self.mediaPlayer.pause()
+        else:
+            self.mediaPlayer.play()
+
+    def media_state_changed(self):
+        if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
+            self.playButton.setIcon(
+                    self.style().standardIcon(QStyle.SP_MediaPause))
+        else:
+            self.playButton.setIcon(
+                    self.style().standardIcon(QStyle.SP_MediaPlay))
+
+    def position_changed(self, position):
+        self.positionSlider.setValue(position)
+
+    def duration_changed(self, duration):
+        self.positionSlider.setRange(0, duration)
+
+    def set_position(self, position):
+        self.mediaPlayer.setPosition(position)
+
+
+class Playlist(QWidget, Ui_Formplaylist):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        self.print_playlist_cat()
+        self.print_playlist_dog()
+        self.print_playlist_rus()
+        self.print_playlist_math()
+        self.print_playlist_mouse()
+        self.print_playlist_physics()
+
+    def print_playlist_cat(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT name FROM videos WHERE id BETWEEN 31 AND 35"""))
+        results = list(map(lambda x: str(x)[1:-1], results))
+        self.listWidget_cat.addItems(results)
+
+    def print_playlist_math(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT name FROM videos WHERE id BETWEEN 36 AND 40"""))
+        results = list(map(lambda x: str(x)[1:-1], results))
+        self.listWidget_math.addItems(results)
+
+    def print_playlist_physics(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT name FROM videos WHERE id BETWEEN 41 AND 45"""))
+        results = list(map(lambda x: str(x)[1:-1], results))
+        self.listWidget_phys.addItems(results)
+
+    def print_playlist_rus(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT name FROM videos WHERE id BETWEEN 46 AND 50"""))
+        results = list(map(lambda x: str(x)[1:-1], results))
+        self.listWidget_rus.addItems(results)
+
+    def print_playlist_dog(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT name FROM videos WHERE id BETWEEN 51 AND 55"""))
+        results = list(map(lambda x: str(x)[1:-1], results))
+        self.listWidget_dog.addItems(results)
+
+    def print_playlist_mouse(self):
+        connection = sqlite3.connect('Watchtube.db')
+        cursor = connection.cursor()
+        results = list(cursor.execute(f"""SELECT name FROM videos WHERE id BETWEEN 56 AND 60"""))
+        results = list(map(lambda x: str(x)[1:-1].strip(r'\n'), results))
+        self.listWidget_mouse.addItems(results)
+
+
+def except_hook(clc, exception, traceback):
+    sys.__excepthook__(clc, exception, traceback)
+
+
+if __name__ == '__main__':
+    sys.excepthook = except_hook
+    app = QApplication(sys.argv)
+    wnd = WatchTube()
+    wnd.setWindowTitle("Watchtube")
+    wnd.show()
+    sys.exit(app.exec())
